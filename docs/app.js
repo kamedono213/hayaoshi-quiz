@@ -1,7 +1,7 @@
 // はやおしクイズ — 問題文が1文字ずつ出てくる。分かったところで「押す」→ 答える(自分で採点 / 4択)。
 // 問題は data/questions.json(tools/build-data.js が KoukaQuiz の元データから作る)
 const app = document.getElementById('app');
-const SHOP = 'https://kentei-drill.booth.pm/';
+const SHOP = 'https://kentei-drill.booth.pm/items/9034193';
 let Q = [];
 let S = { screen: 'home' };
 
