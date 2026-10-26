@@ -48,6 +48,84 @@
   }, true);
 })();
 
+// ---------- ふりがな(ちりパズルと同じく、漢字の上に小さく読みを出す)
+// 辞書 window.FURI は furi.js(onze.ltd/tools/furigana/make-furi.js が自動生成)。
+// 画面に出た文字を自動で包むので、各画面のコードは変えなくてよい。答え合わせに使う textContent は変わらない(読みは CSS で表示)。
+// 切りかえボタンは、data-furi-slot を付けた場所に自動で入る。設定はアプリごとに保存
+(() => {
+  const D = window.FURI || {};
+  // 先頭の1文字ごとに、長い順に並べておく(文まるごと → 単語の順に当てはめる)
+  const byHead = {};
+  Object.keys(D).sort((a, b) => b.length - a.length).forEach(k => (byHead[k[0]] = byHead[k[0]] || []).push(k));
+  const KEY = 'furi:' + location.pathname;
+  let on = true;
+  try { on = localStorage.getItem(KEY) !== '0'; } catch (e) { /* 保存できなくても動く */ }
+  const css = document.createElement('style');
+  // アプリ側の「span に〜」という指定が効かないように、ルビの span は !important で固める
+  css.textContent = '.rbw,.rb{margin:0!important;border:0!important;background:none!important;min-width:0!important;font:inherit!important;color:inherit!important;letter-spacing:inherit!important;text-indent:0!important}'
+    + '.rbw{display:inline!important;padding:0!important}'
+    + '.rb{display:inline-block!important;position:relative!important;padding:0!important}'
+    + 'html.furi .rb{padding-top:.62em!important}'
+    + 'html.furi .rb::before{content:attr(data-rt);position:absolute;top:0;left:50%;transform:translateX(-50%);font-size:.5em;font-weight:700;line-height:1.1;white-space:nowrap;letter-spacing:0;pointer-events:none}'
+    + '.furi-toggle{justify-self:start;align-self:center;width:auto;flex:none;border:1.5px solid rgba(127,127,127,.4);background:transparent;color:inherit;border-radius:999px;padding:4px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}'
+    + '.furi-toggle[aria-pressed="true"]{border-color:currentColor}';
+  document.head.appendChild(css);
+  const apply = () => document.documentElement.classList.toggle('furi', on);
+  apply();
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION', 'TITLE']);
+  const ok = el => {
+    for (let e = el; e && e.nodeType === 1; e = e.parentNode) {
+      if (e.namespaceURI === 'http://www.w3.org/2000/svg') return false;
+      if (e.classList.contains('rb') || e.classList.contains('rbw') || e.hasAttribute('data-nofuri')) return false;
+      if (e.lang && !/^ja/i.test(e.lang)) return false; // 外国語の文字(中国語の漢字など)には付けない
+      if (SKIP.has(e.tagName)) return false;
+    }
+    return true;
+  };
+  function wrapText(node) {
+    const t = node.nodeValue;
+    if (!/[一-鿿々]/.test(t)) return;
+    const frag = document.createDocumentFragment();
+    let last = 0, hit = false;
+    for (let i = 0; i < t.length;) {
+      const k = (byHead[t[i]] || []).find(x => t.startsWith(x, i));
+      if (!k) { i++; continue; }
+      hit = true;
+      if (i > last) frag.appendChild(document.createTextNode(t.slice(last, i)));
+      for (const seg of D[k]) {
+        if (typeof seg === 'string') { frag.appendChild(document.createTextNode(seg)); continue; }
+        const s = document.createElement('span'); s.className = 'rb'; s.dataset.rt = seg[1]; s.textContent = seg[0];
+        frag.appendChild(s);
+      }
+      i = last = i + k.length;
+    }
+    if (!hit) return;
+    if (last < t.length) frag.appendChild(document.createTextNode(t.slice(last)));
+    // 1つの span にまとめて入れる(flex や grid の中で、ルビごとに改行されないように)
+    const w = document.createElement('span'); w.className = 'rbw'; w.appendChild(frag);
+    node.replaceWith(w);
+  }
+  function toggleHtml() { return `<button type="button" class="furi-toggle" data-furi-toggle aria-pressed="${on}">ふりがな ${on ? 'あり' : 'なし'}</button>`; }
+  function scan(root) {
+    if (root.nodeType === 3) { if (ok(root.parentNode)) wrapText(root); return; }
+    if (root.nodeType !== 1 || !ok(root)) return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), list = [];
+    let n; while ((n = w.nextNode())) if (ok(n.parentNode)) list.push(n);
+    list.forEach(wrapText);
+    root.querySelectorAll && root.querySelectorAll('[data-furi-slot]').forEach(s => { if (!s.querySelector('[data-furi-toggle]')) s.insertAdjacentHTML('beforeend', toggleHtml()); });
+    if (root.hasAttribute && root.hasAttribute('data-furi-slot') && !root.querySelector('[data-furi-toggle]')) root.insertAdjacentHTML('beforeend', toggleHtml());
+  }
+  new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) scan(n); })
+    .observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-furi-toggle]'); if (!b) return;
+    on = !on; try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (err) { /* 保存できなくても切りかわる */ }
+    apply();
+    document.querySelectorAll('[data-furi-toggle]').forEach(x => { x.setAttribute('aria-pressed', on); x.textContent = 'ふりがな ' + (on ? 'あり' : 'なし'); });
+  });
+  if (document.body) scan(document.body);
+})();
+
 // はやおしクイズ — 問題文が1文字ずつ出てくる。分かったところで「押す」→ 答える(自分で採点 / 4択)。
 // 問題は data/questions.json(tools/build-data.js が KoukaQuiz の元データから作る)
 const app = document.getElementById('app');
@@ -96,7 +174,7 @@ function renderHome() {
   const rec = store.get('rec', { n: 0, ok: 0, posSum: 0, pushed: 0 });
   const chip = (key, val, label, small) => `<button class="chip" data-k="${key}" data-v="${esc(val)}" aria-pressed="${pref[key] === val}">${esc(label)}${small != null ? `<small>${small}</small>` : ''}</button>`;
   app.innerHTML = `
-    <header class="mast"><p class="eyebrow">早押しクイズの練習</p><h1>はやおし<span>クイズ</span></h1>
+    <header class="mast" data-furi-slot><p class="eyebrow">早押しクイズの練習</p><h1>はやおし<span>クイズ</span></h1>
       <p class="muted">問題文が1文字ずつ出てきます。分かった瞬間に「押す」! 早く押せるほど上級者。</p></header>
     <section class="panel"><h2>ジャンル</h2>
       <div class="chips">${chip('cat', 'all', '全ジャンル', Q.length)}${cats.map(c => chip('cat', c, c, Q.filter(q => q.cat === c).length)).join('')}</div></section>
